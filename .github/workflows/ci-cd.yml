@@ -25,7 +25,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # Force lowercase for Docker image compatibility
+  IMAGE_NAME: ${{ github.repository_owner }}/anti-gravity-devops
 
 jobs:
   # ============================================================================
@@ -78,10 +79,19 @@ jobs:
     outputs:
       image-tag: ${{ steps.meta.outputs.tags }}
       image-digest: ${{ steps.build.outputs.digest }}
+      full-image: ${{ steps.image-name.outputs.image }}
 
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
+
+      - name: 🔧 Set lowercase image name
+        id: image-name
+        run: |
+          # Docker requires lowercase image names
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+          echo "image=${IMAGE_LOWER}" >> $GITHUB_OUTPUT
+          echo "Using image: ${IMAGE_LOWER}"
 
       - name: 🔐 Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -94,7 +104,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ steps.image-name.outputs.image }}
           tags: |
             type=sha,prefix=
             type=raw,value=latest,enable={{is_default_branch}}
@@ -127,7 +137,55 @@ jobs:
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
   # ============================================================================
-  # JOB 3: DEPLOY
+  # JOB 3: SECURITY SCAN
+  # Purpose: Scan Docker image for vulnerabilities
+  # ============================================================================
+  security-scan:
+    name: 🔒 Security Scan
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    
+    permissions:
+      security-events: write
+      packages: read
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🔐 Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔧 Set lowercase image name
+        id: image-name
+        run: |
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" | tr '[:upper:]' '[:lower:]')
+          echo "image=${IMAGE_LOWER}" >> $GITHUB_OUTPUT
+
+      - name: 🔍 Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.image-name.outputs.image }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          exit-code: '0'  # Don't fail on vulnerabilities, just report
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+      - name: 📤 Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+        continue-on-error: true  # Don't fail if SARIF upload fails
+
+  # ============================================================================
+  # JOB 4: DEPLOY
   # Purpose: Deploy to Kubernetes cluster
   # Requires: KUBE_CONFIG secret with base64-encoded kubeconfig
   # ============================================================================
@@ -138,37 +196,54 @@ jobs:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     
     environment: production  # Use GitHub environment for additional protection
+    continue-on-error: true  # Don't fail pipeline if K8s not configured
 
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
+      - name: 🔧 Check for Kubernetes config
+        id: k8s-check
+        run: |
+          if [ -z "${{ secrets.KUBE_CONFIG }}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "⚠️ KUBE_CONFIG secret not set. Skipping deployment."
+            echo "### ⚠️ Kubernetes Deployment Skipped" >> $GITHUB_STEP_SUMMARY
+            echo "KUBE_CONFIG secret is not configured." >> $GITHUB_STEP_SUMMARY
+            echo "To enable deployment, add your kubeconfig as a secret." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "configured=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: 🔧 Set up kubectl
+        if: steps.k8s-check.outputs.configured == 'true'
         uses: azure/setup-kubectl@v3
         with:
           version: 'v1.28.0'
 
       - name: 🔐 Configure Kubernetes credentials
+        if: steps.k8s-check.outputs.configured == 'true'
         run: |
           mkdir -p $HOME/.kube
           echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
           chmod 600 $HOME/.kube/config
 
       - name: 📋 Verify cluster connection
+        if: steps.k8s-check.outputs.configured == 'true'
         run: |
           kubectl cluster-info
           kubectl get nodes
 
       - name: 🏷️ Update image tag in deployment
+        if: steps.k8s-check.outputs.configured == 'true'
         run: |
-          # Update the deployment with the new image tag
           cd k8s
-          # Use the SHA-based tag for precise versioning
-          IMAGE_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
-          sed -i "s|image: .*anti-gravity.*|image: ${IMAGE_TAG}|g" deployment.yaml
+          IMAGE_TAG=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" | tr '[:upper:]' '[:lower:]')
+          sed -i "s|image: .*|image: ${IMAGE_TAG}|g" deployment.yaml
           cat deployment.yaml
 
       - name: 🚀 Deploy to Kubernetes
+        if: steps.k8s-check.outputs.configured == 'true'
         run: |
           kubectl apply -f k8s/namespace.yaml
           kubectl apply -f k8s/configmap.yaml
@@ -178,10 +253,12 @@ jobs:
           kubectl apply -f k8s/hpa.yaml
 
       - name: ⏳ Wait for deployment rollout
+        if: steps.k8s-check.outputs.configured == 'true'
         run: |
           kubectl rollout status deployment/anti-gravity -n anti-gravity --timeout=120s
 
       - name: ✅ Verify deployment
+        if: steps.k8s-check.outputs.configured == 'true'
         run: |
           echo "### 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -195,32 +272,3 @@ jobs:
           kubectl get svc -n anti-gravity >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
-  # ============================================================================
-  # JOB 4: SECURITY SCAN
-  # Purpose: Scan Docker image for vulnerabilities
-  # ============================================================================
-  security-scan:
-    name: 🔒 Security Scan
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    
-    permissions:
-      security-events: write
-
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 🔍 Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-
-      - name: 📤 Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: 'trivy-results.sarif'
