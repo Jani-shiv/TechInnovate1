@@ -158,7 +158,7 @@ Choose one:
 ### 1️⃣ Clone and Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/anti-gravity-devops.git
+git clone https://github.com/Jani-shiv/anti-gravity-devops.git
 cd anti-gravity-devops
 npm install
 ```
