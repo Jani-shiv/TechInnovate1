@@ -43,3 +43,7 @@ pids/
 *.pid
 *.seed
 *.pid.lock
+
+# Test output
+test-results.json
+test_output.txt

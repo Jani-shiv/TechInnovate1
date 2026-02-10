@@ -23,28 +23,12 @@ describe('Anti-Gravity DevOps Platform', () => {
   // DASHBOARD ENDPOINT TESTS
   // ============================================================================
   
-  describe('GET / (Root API)', () => {
-    it('should return JSON with system info', async () => {
-      const response = await request(app)
+  describe('GET / (Dashboard)', () => {
+    it('should return HTML dashboard', async () => {
+      await request(app)
         .get('/')
-        .expect('Content-Type', /json/)
+        .expect('Content-Type', /html/)
         .expect(200);
-      
-      expect(response.body).toHaveProperty('application', 'Anti-Gravity DevOps Platform');
-      expect(response.body).toHaveProperty('version');
-      expect(response.body).toHaveProperty('hostname');
-      expect(response.body).toHaveProperty('timestamp');
-      expect(response.body).toHaveProperty('endpoints');
-    });
-
-    it('should include all available endpoints in response', async () => {
-      const response = await request(app)
-        .get('/')
-        .expect(200);
-      
-      expect(response.body.endpoints).toHaveProperty('health');
-      expect(response.body.endpoints).toHaveProperty('load');
-      expect(response.body.endpoints).toHaveProperty('metrics');
     });
   });
 

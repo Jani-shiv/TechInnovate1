@@ -1,0 +1,45 @@
+openapi: 3.0.0
+info:
+  title: Anti-Gravity DevOps Platform API
+  description: API for the self-healing, auto-scaling DevOps platform.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000
+    description: Local server
+paths:
+  /:
+    get:
+      summary: Welcome to the API
+      responses:
+        '200':
+          description: Successful response
+  /health:
+    get:
+      summary: Health Check
+      responses:
+        '200':
+          description: Application is healthy
+  /ready:
+    get:
+      summary: Readiness Check
+      responses:
+        '200':
+          description: Application is ready
+  /metrics:
+    get:
+      summary: Prometheus Metrics
+      responses:
+        '200':
+          description: Metrics data
+  /load:
+    get:
+      summary: CPU Stress Test
+      parameters:
+        - in: query
+          name: duration
+          schema:
+            type: integer
+          description: Duration in seconds
+      responses:
+        '200':
+          description: Load test completed

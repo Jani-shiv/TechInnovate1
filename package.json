@@ -19,8 +19,18 @@
   "author": "DevOps Engineer",
   "license": "MIT",
   "dependencies": {
+    "@opentelemetry/auto-instrumentations-node": "^0.69.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.211.0",
+    "@opentelemetry/sdk-node": "^0.211.0",
+    "cors": "^2.8.6",
     "express": "^4.18.2",
-    "prom-client": "^15.1.0"
+    "express-rate-limit": "^8.2.1",
+    "helmet": "^8.1.0",
+    "prom-client": "^15.1.0",
+    "redis": "^5.10.0",
+    "swagger-ui-express": "^5.0.1",
+    "winston": "^3.19.0",
+    "yamljs": "^0.3.0"
   },
   "devDependencies": {
     "jest": "^29.7.0",
